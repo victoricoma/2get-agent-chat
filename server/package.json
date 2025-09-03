@@ -1,0 +1,31 @@
+{
+  "name": "server",
+   "type": "commonjs",
+  "private": true,
+  "version": "1.0.0",
+  "description": "backend-2get",
+  "keywords": [
+    "2get"
+  ],
+  "homepage": "https://github.com/victoricoma/2get-agent-chat#readme",
+  "bugs": {
+    "url": "https://github.com/victoricoma/2get-agent-chat/issues"
+  },
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/victoricoma/2get-agent-chat.git"
+  },
+  "license": "MIT",
+  "author": "Victor Sena Icoma",
+  "main": "index.js",
+  "scripts": {
+    "test": "echo \"Error: no test specified\" && exit 1",
+    "start": "node index.js"
+  },
+  "dependencies": {
+    "cors": "^2.8.5",
+    "dotenv": "^17.2.2",
+    "express": "^5.1.0",
+    "openai": "^5.19.1"
+  }
+}
