@@ -1,38 +1,57 @@
+// server/index.js
 require('dotenv/config');
 const express = require('express');
 const cors = require('cors');
 const OpenAI = require('openai');
 
-const app = express();
-app.use(cors());
-app.use(express.json());
+// ------------- Config -------------
+const {
+  OPENAI_API_KEY,
+  ASSISTANT_ID,
+  NODE_ENV,
+  CORS_ORIGINS, // separado por vírgula. Ex: "https://2getfamily.icoma.com.br,https://2get.icoma.com.br,http://localhost:5173"
+  PORT = process.env.PORT || 8080, // Cloud Run expõe PORT
+} = process.env;
 
-const { OPENAI_API_KEY, ASSISTANT_ID, PORT = 8787 } = process.env;
-
-// Sane check: não sobe sem chave
 if (!OPENAI_API_KEY) {
-  console.error('OPENAI_API_KEY ausente. Configure em server/.env');
-  process.exit(1);
+  console.error('Falta OPENAI_API_KEY (defina nas variáveis do App Hosting).');
+  // Não derruba o processo; só impede /api/chat de funcionar
 }
 if (!ASSISTANT_ID) {
-  console.error('ASSISTANT_ID ausente. Copie do Playground (asst_...)');
-  process.exit(1);
+  console.error('Falta ASSISTANT_ID (asst_...).');
 }
 
+const app = express();
+
+// CORS: autorize seu front + localhost dev
+const allowList = (CORS_ORIGINS || '').split(',').map(s => s.trim()).filter(Boolean);
+app.use(cors({
+  origin: (origin, cb) => {
+    // Sem origin (ex: curl) → permite
+    if (!origin) return cb(null, true);
+    if (allowList.length === 0 || allowList.includes(origin)) return cb(null, true);
+    return cb(new Error('CORS bloqueado para esta origem: ' + origin));
+  },
+  credentials: false,
+}));
+app.use(express.json({ limit: '1mb' }));
+
+// Cliente OpenAI
 const openai = new OpenAI({ apiKey: OPENAI_API_KEY });
 
-console.log(`OpenAI key iniciada: ${OPENAI_API_KEY.slice(0, 6)}•••`);
+// --------- Rotas de saúde (Cloud Run) ----------
+app.get('/', (_req, res) => {
+  res.status(200).json({ ok: true, service: '2get-agent-chat', env: NODE_ENV || 'prod', ts: Date.now() });
+});
+app.get('/health', (_req, res) => res.status(200).send('ok'));
 
+// --------- /api/chat ----------
 async function waitForRun(threadId, runId) {
   if (!threadId || !runId) {
     throw new Error(`IDs inválidos: threadId=${threadId} runId=${runId}`);
   }
-  if (!String(threadId).startsWith('thread_')) {
-    throw new Error(`threadId não parece uma thread: ${threadId}`);
-  }
-  if (!String(runId).startsWith('run_')) {
-    throw new Error(`runId não parece um run: ${runId}`);
-  }
+  if (!String(threadId).startsWith('thread_')) throw new Error(`threadId inválido: ${threadId}`);
+  if (!String(runId).startsWith('run_')) throw new Error(`runId inválido: ${runId}`);
 
   while (true) {
     const run = await openai.beta.threads.runs.retrieve(threadId, runId);
@@ -46,45 +65,33 @@ async function waitForRun(threadId, runId) {
 
 app.post('/api/chat', async (req, res) => {
   try {
-    const { message, threadId: incomingThreadId } = req.body ?? {};
-    if (!message) return res.status(400).json({ error: 'message obrigatório' });
-
-    console.log('BODY:', req.body);
-
-    // 1) decidir thread
-    let thread;
-    if (incomingThreadId && String(incomingThreadId).startsWith('thread_')) {
-      thread = { id: incomingThreadId };
-      console.log('Reusando thread existente:', thread.id);
-    } else {
-      thread = await openai.beta.threads.create();
-      console.log('Criada nova thread:', thread.id);
+    if (!OPENAI_API_KEY || !ASSISTANT_ID) {
+      return res.status(500).json({ error: 'Backend sem credenciais (OPENAI_API_KEY/ASSISTANT_ID).' });
     }
 
-    if (!thread?.id || !String(thread.id).startsWith('thread_')) {
-      throw new Error(`thread.id inválido: ${thread?.id}`);
+    const { message, threadId } = req.body ?? {};
+    if (!message || typeof message !== 'string') {
+      return res.status(400).json({ error: 'message obrigatório (string).' });
     }
 
-    // 2) mensagem do usuário
+    // 1) Cria/reaproveita thread
+    const thread = threadId && String(threadId).startsWith('thread_')
+      ? { id: threadId }
+      : await openai.beta.threads.create();
+
+    // 2) Mensagem do usuário
     await openai.beta.threads.messages.create(thread.id, {
       role: 'user',
       content: message,
     });
 
-    // 3) criar run
-    const run = await openai.beta.threads.runs.create(thread.id, {
-      assistant_id: process.env.ASSISTANT_ID,
-    });
+    // 3) Run do assistant
+    const run = await openai.beta.threads.runs.create(thread.id, { assistant_id: ASSISTANT_ID });
 
-    console.log('Run criado:', run?.id);
-    if (!run?.id || !String(run.id).startsWith('run_')) {
-      throw new Error(`run.id inválido: ${run?.id}`);
-    }
-
-    // 4) aguardar terminar
+    // 4) Espera terminar
     await waitForRun(thread.id, run.id);
 
-    // 5) coletar resposta
+    // 5) Busca última resposta do assistant
     const list = await openai.beta.threads.messages.list(thread.id, { limit: 10 });
     const assistantMsg = list.data.find(m => m.role === 'assistant');
 
@@ -96,30 +103,15 @@ app.post('/api/chat', async (req, res) => {
     return res.json({ threadId: thread.id, text });
   } catch (e) {
     console.error('Erro /api/chat:', e?.response?.data ?? e);
-    return res.status(500).json({ error: String(e.message || e) });
+    return res.status(500).json({ error: e?.message || 'erro' });
   }
 });
 
-async function waitForRun(threadId, runId) {
-  console.log('waitForRun -> threadId:', threadId, '| runId:', runId);
+// --------- Start ----------
+app.listen(PORT, () => {
+  console.log(`API ouvindo em http://localhost:${PORT}`);
+});
 
-  if (!threadId || !runId) {
-    throw new Error(`IDs inválidos: threadId=${threadId} runId=${runId}`);
-  }
-  if (!String(threadId).startsWith('thread_')) {
-    throw new Error(`threadId não parece uma thread: ${threadId}`);
-  }
-  if (!String(runId).startsWith('run_')) {
-    throw new Error(`runId não parece um run: ${runId}`);
-  }
-
-  while (true) {
-    const run = await openai.beta.threads.runs.retrieve(threadId, runId);
-    if (run.status === 'completed') return run;
-    if (['failed', 'cancelled', 'expired'].includes(run.status)) {
-      throw new Error(`Run ${runId} falhou: ${run.status}`);
-    }
-    await new Promise(r => setTimeout(r, 800));
-  }
-}
-
+// Segurança contra quedas silenciosas
+process.on('unhandledRejection', (e) => console.error('unhandledRejection:', e));
+process.on('uncaughtException', (e) => console.error('uncaughtException:', e));

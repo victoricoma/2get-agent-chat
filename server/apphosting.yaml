@@ -1,0 +1,11 @@
+runConfig:
+  cpu: 1
+  memoryMiB: 512
+
+env:
+  - variable: OPENAI_API_KEY
+    value: "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"
+  - variable: ASSISTANT_ID
+    value: "asst_8VBLMvO7Jj7pvPxvrZ4djzF0"
+  - variable: CORS_ORIGINS
+    value: "https://2getfamily.icoma.com.br,https://2get.icoma.com.br,http://localhost:5173"
