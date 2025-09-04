@@ -3,10 +3,10 @@
   "private": true,
   "version": "1.0.0",
   "description": "Backend Assistants API para 2get",
-  "main": "server/index.js",
+  "main": "index.js",
   "scripts": {
-    "start": "node server/index.js",
-    "dev": "node server/index.js"
+    "start": "node index.js",
+    "dev": "node index.js"
   },
   "engines": {
     "node": ">=20.x"

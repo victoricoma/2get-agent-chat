@@ -1,21 +1,18 @@
-// server/index.js
 require('dotenv/config');
 const express = require('express');
 const cors = require('cors');
 const OpenAI = require('openai');
 
-// ------------- Config -------------
 const {
   OPENAI_API_KEY,
   ASSISTANT_ID,
   NODE_ENV,
-  CORS_ORIGINS, // separado por vírgula. Ex: "https://2getfamily.icoma.com.br,https://2get.icoma.com.br,http://localhost:5173"
-  PORT = process.env.PORT || 8080, // Cloud Run expõe PORT
+  CORS_ORIGINS,
+  PORT = process.env.PORT || 8080,
 } = process.env;
 
 if (!OPENAI_API_KEY) {
   console.error('Falta OPENAI_API_KEY (defina nas variáveis do App Hosting).');
-  // Não derruba o processo; só impede /api/chat de funcionar
 }
 if (!ASSISTANT_ID) {
   console.error('Falta ASSISTANT_ID (asst_...).');

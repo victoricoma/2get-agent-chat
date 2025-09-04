@@ -1,7 +1,7 @@
 {
   "apphosting": {
     "backendId": "agente-2get",
-    "rootDir": "server",
+    "rootDir": "/server",
     "ignore": [
       "node_modules",
       ".git",
