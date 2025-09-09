@@ -20,11 +20,9 @@ if (!ASSISTANT_ID) {
 
 const app = express();
 
-// CORS: autorize seu front + localhost dev
 const allowList = (CORS_ORIGINS || '').split(',').map(s => s.trim()).filter(Boolean);
 app.use(cors({
   origin: (origin, cb) => {
-    // Sem origin (ex: curl) → permite
     if (!origin) return cb(null, true);
     if (allowList.length === 0 || allowList.includes(origin)) return cb(null, true);
     return cb(new Error('CORS bloqueado para esta origem: ' + origin));
@@ -33,16 +31,13 @@ app.use(cors({
 }));
 app.use(express.json({ limit: '1mb' }));
 
-// Cliente OpenAI
 const openai = new OpenAI({ apiKey: OPENAI_API_KEY });
 
-// --------- Rotas de saúde (Cloud Run) ----------
 app.get('/', (_req, res) => {
   res.status(200).json({ ok: true, service: '2get-agent-chat', env: NODE_ENV || 'prod', ts: Date.now() });
 });
 app.get('/health', (_req, res) => res.status(200).send('ok'));
 
-// --------- /api/chat ----------
 async function waitForRun(threadId, runId) {
   if (!threadId || !runId) {
     throw new Error(`IDs inválidos: threadId=${threadId} runId=${runId}`);
@@ -71,24 +66,20 @@ app.post('/api/chat', async (req, res) => {
       return res.status(400).json({ error: 'message obrigatório (string).' });
     }
 
-    // 1) Cria/reaproveita thread
+
     const thread = threadId && String(threadId).startsWith('thread_')
       ? { id: threadId }
       : await openai.beta.threads.create();
 
-    // 2) Mensagem do usuário
     await openai.beta.threads.messages.create(thread.id, {
       role: 'user',
       content: message,
     });
 
-    // 3) Run do assistant
     const run = await openai.beta.threads.runs.create(thread.id, { assistant_id: ASSISTANT_ID });
 
-    // 4) Espera terminar
     await waitForRun(thread.id, run.id);
 
-    // 5) Busca última resposta do assistant
     const list = await openai.beta.threads.messages.list(thread.id, { limit: 10 });
     const assistantMsg = list.data.find(m => m.role === 'assistant');
 
@@ -103,12 +94,47 @@ app.post('/api/chat', async (req, res) => {
     return res.status(500).json({ error: e?.message || 'erro' });
   }
 });
+app.get('/api/threads/:threadId', async (req, res) => {
+  try {
+    const threadId = req.params.threadId;
+    if (!threadId?.startsWith('thread_')) {
+      return res.status(400).json({ error: `threadId inválido: ${threadId}` });
+    }
 
-// --------- Start ----------
+    const { include = 'messages', limit = 20, before, after } = req.query;
+
+    const thread = await openai.beta.threads.retrieve(threadId);
+
+    let messages = undefined;
+    if (String(include).split(',').map(s => s.trim()).includes('messages')) {
+      const list = await openai.beta.threads.messages.list(threadId, {
+        limit: Math.min(Number(limit) || 20, 100), 
+        before, 
+        after,
+        order: 'desc',
+      });
+
+      messages = list.data.map(m => ({
+        id: m.id,
+        role: m.role,               
+        created_at: m.created_at,  
+        run_id: m.run_id || null,
+        text: (m.content || [])
+          .filter(c => c.type === 'text')
+          .map(c => c.text.value)
+          .join('\n')
+      }));
+    }
+
+    return res.json({ thread, messages });
+  } catch (e) {
+    console.error('Erro GET /api/threads/:threadId:', e?.response?.data ?? e);
+    return res.status(500).json({ error: e?.message || 'erro' });
+  }
+});
 app.listen(PORT, () => {
   console.log(`API ouvindo em http://localhost:${PORT}`);
 });
 
-// Segurança contra quedas silenciosas
 process.on('unhandledRejection', (e) => console.error('unhandledRejection:', e));
 process.on('uncaughtException', (e) => console.error('uncaughtException:', e));
